@@ -1,0 +1,230 @@
+---
+title: "Trabalho 3: Regressão linear com dados Lifexpec"
+author: "Luiza Lober de Souza Piva"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Descrição do trabalho
+
+Utilize os dados do arquivo Expectativa de vida, de 2014,
+para identificar quais variáveis são relevantes na predição da
+expectativa de vida na população de 131 países.
+Faça a análise descritiva, a seleção de variáveis pelo método
+stepwise, a análise dos resíduos e a interpretação dos
+resultados, todos no software R.
+
+** A versão final deste trabalho foi feita com RMarkDown**.
+Para baixar o código fonte, acesse: <https://github.com/luizalober/doc-disciplinas/tree/main/estatistica-2s2022/trabalho-3>
+
+## Configurações e importação dos dados
+```{r include=FALSE}
+#Importa as bibliotecas necessárias
+#-> não esqueça de instalá-las se for necessário!
+
+#library(devtools)
+library(ggplot2)
+library(qqplotr)
+library(ellipse)
+library(RColorBrewer)
+library(GGally)
+library(olsrr)
+library(car)   #Para usar a função influencePlot()
+
+```
+
+Importa os dados que iremos utilizar:
+```{r}
+#Importa os dados
+dados_vida = read.csv("Lifexpec.csv")   #removeremos algumas colunas posteriormente
+```
+
+Extrai o índice para uso futuro
+```{r}
+indice <- as.numeric(rownames(dados_vida))
+```
+
+Sumário dos dados importados:
+```{r}
+summary(dados_vida)
+```
+
+```{r}
+#Remove as colunas country e status para fazer as correlações
+#-> Queremos manter somente os dados numéricos
+dados_vida$Country <- NULL
+dados_vida$Status <- NULL
+```
+
+## Análise descritiva
+Vamos começar a análise descritiva utilizando correlogramas.
+
+O código abaixo cria um correlograma básico para os dados de expectativa de vida, removendo as diagonais superiores:
+
+```{r eval=FALSE, include=FALSE}
+ggpairs(dados_vida,
+        lower  = list(continuous = "points"),
+        upper  = list(continuous = "blank"),
+  )
+```
+
+Como este gráfico precisou ser ajustado manualmente para legibilidade, este .pdf 
+inclui a versão corrigida da saída em R acima:
+
+![Correlograma para as variáveis de expectativa de vida](correlograma-base-lifexpec.pdf)
+
+Abaixo, há outra maneira, simplificada, de visualizar as correlações:
+
+```{r}
+#Constroi a paleta de cores necessária:
+my_colors <- brewer.pal(5, "Spectral")
+my_colors <- colorRampPalette(my_colors)(100)
+
+#Cria o correlograma modificado:
+data_corr <- cor(dados_vida)
+#write.csv(data_corr, 'corr-matriz-lifexpec.csv')  #salva a matriz de correlação
+                                                   #Ela está disponível na pasta 
+                                                   #do GitHub citada na descrição
+
+ord <- order(data_corr[1, ])
+data_ord <- data_corr[ord, ord]
+plotcorr(data_ord , col=my_colors[data_ord*50+50] , mar=c(1,1,1,1)  )
+```
+
+Dos gráficos acima, podemos ver que há uma grande correlação entre algumas variáveis, tais como "LifeExpec" e "AdMortality", "HIV" e "AdMortality" (correlação negativa), "IncomeComp" e "BMI", dentre outras, e sabemos que variáveis com alta correlação (positiva ou negativa) não devem ser inclusas simultaneamente no modelo.
+
+## Seleção de variáveis pelo método "stepwise"
+
+```{r echo=TRUE}
+# Cria o modelo de regressão com lm() e aplica o stepwise
+model <- lm(data = dados_vida)
+model_stepwise = ols_step_both_p(model, details=FALSE)
+model_stepwise
+
+# Para maiores detalhamentos sobre a execução do algorítimo, 
+# veja a seção "Apêndices", onde todo o output com essa modificação está disponível.
+#-> isto não foi feito para este notebook neste ponto do código para evitar 
+#ocupar muito espaço.
+```
+
+Podemos ver que as variávies "IncomeComp", "AdMortality", "HIV", "TotalExpend" e "Diphtheria" foram as escolhidas pelo modelo.
+
+Também é possível visualizar os gráficos gerados automaticamente pelo código, que consideram o coeficiente de determinação $R^2$, Cp de Mallow, coeficiente de determinação ajustado, critério de informação de Akaike (AIC) e os critérios de informação bayesiana padrão (SBC) e de Sawa (SBIC):
+
+```{r}
+plot(model_stepwise)
+```
+Deles, nota-se que não seria necessário incluir mais nenhuma variável extra, devido ao platô mostrado para todos os coeficientes testados.
+
+Além dos histogramas para tanto o modelo base quanto o step-wise:
+
+```{r}
+hist(model$residuals)
+hist(model_stepwise$model$residuals)
+```
+## Análise de resíduos
+
+Agora, devemos testar a homocedasticidade deste modelo. 
+Primeiro, calculamos algumas caracteristicas do modelo stepfoward
+
+```{r}
+preditores <- model_stepwise$predictors   
+residuos <- model_stepwise$model$residuals     
+fitted_values <- model_stepwise$model$fitted.values
+
+infl_stepwise <- influence(model_stepwise$model)
+residuos_student <- rstudent(model_stepwise$model)
+dffits_stepwise <- dffits(model_stepwise$model)
+cook_stepwise <- cooks.distance(model_stepwise$model)
+hat_diagonal <- hatvalues(model_stepwise$model, type = c("diagonal"))
+```
+
+Os gráficos abaixo contam com a aplicação da função `Filter()` com critérios específicos
+para cada caso de forma a identificar as observações mais críticas.
+
+Gráfico dos resíduos studentizados vs previsão, além de linha em zero.
+```{r}
+plot(fitted_values, residuos_student); qqline(y=0, col = 2,lwd=2,lty=2)
+#--> Valores < -3 ou > 3:
+Filter(function(x) abs(x) > 3, residuos_student)
+```
+
+Gráfico dffits vs índice, também com linha em zero:
+
+```{r}
+plot(indice, dffits_stepwise); qqline(y=0, col = 2,lwd=2,lty=2)
+#--> Valores < -1 ou > 1:
+Filter(function(x) abs(x) > 1, dffits_stepwise)
+```
+
+
+Gráfico da distância de cook vs índice:
+
+```{r}
+plot(indice, cook_stepwise)
+#--> Valores < 50% de F ou > 50% de F:
+valor_F <- pf(0.5, 5, 131)
+Filter(function(x) abs(x) > valor_F, cook_stepwise)
+```
+
+Gráfico dos resultados na diagonal da matriz chapéu (hat matrix) vs índice:
+
+```{r}
+plot(indice, hat_diagonal)
+#--> Valores h_ii>2p/n (neste caso, .1)
+Filter(function(x) abs(x) > .1, hat_diagonal)
+```
+Gráfico dos resíduos pela diagonal da matriz chapéu:
+
+```{r}
+influencePlot(model_stepwise$model)
+```
+
+
+Por fim, gráfico Q-Q normal com linha de regressão:
+
+```{r}
+qqnorm(residuos_student); qqline(residuos_student, col = 2,lwd=2,lty=2)
+```
+```{r}
+Filter(function(x) abs(x) > 2, residuos_student)
+```
+
+Disto, temos que
+
+*  As observações 12, 99 e 108 têm resíduos, em módulo, acima de 3;
+*  Não há muita discrepância entre o esperado para as observações para as distâncias de Cook e dffits, somente com 39 e 108 como possíveis pontos fora da curva;
+*  A diagonal da matriz chapéu por índices indica que 39, 68, 73, 108, 114, 125, e 131 são possíveis observações outliers. Além disto, ao comparar os resultados dessa matriz com os resíduos studentizados, temos que 12, 39, 68 e 108 também podem ser possíveis valores problemáticos;
+*  Do gráfico Q-Q normal, 4, 12, 26, 39, 48, 63, 99, 108 são os responsáveis pela fuga da normalidade.
+
+Note que vários pontos são acusados como deviantes em múltiplas medidadas, o que aumenta a suspeita que eles realmente sejam problemáticos para a regressão. 
+
+
+
+## Interpretação dos coeficientes da regressão
+
+```{r}
+summary(model_stepwise$model)
+```
+As cinco variáveis mais influentes na expectativa de vida, segundo o modelo, são as listadas acima:
+
+*  IncomeComp: Fator IDH
+*  Ad(ult)Mortality: mortalidade na população adulta
+*  HIV: Óbitos por HIV por 1k de habitantes
+*  TotalExpend: % do PIB gasto em saúde;
+*  Diphtheria: número de contaminações por difteria
+
+As quatro primeiras podem parecer intuitivamente relevantes para o resultado obtido, mesmo antes de aplicar o modelo de regressão.
+
+
+## Apêndice: resultado da seleção de variáveis detalhado com o método stepwise
+```{r}
+ols_step_both_p(model, details=TRUE)
+```
+
